@@ -18,6 +18,8 @@ namespace WebAPI.OutputCache
     public class CacheOutputAttribute : BaseCacheAttribute
     {
         protected static MediaTypeHeaderValue DefaultMediaType = new MediaTypeHeaderValue("application/json");
+        private const string NullContent = "null";
+        private readonly int NullContentLength = NullContent.Length;
 
         /// <summary>
         /// Cache enabled only for requests when Thread.CurrentPrincipal is not set
@@ -183,19 +185,39 @@ namespace WebAPI.OutputCache
                     if (actionExecutedContext.Response.Content != null)
                     {
                         actionExecutedContext.Response.Content.ReadAsByteArrayAsync().ContinueWith(t =>
-                            {
-                                var baseKey = config.MakeBaseCachekey(actionExecutedContext.ActionContext.ControllerContext.ControllerDescriptor.ControllerName, actionExecutedContext.ActionContext.ActionDescriptor.ActionName);
-                                
-                                WebApiCache.Add(baseKey, string.Empty, cacheTime.AbsoluteExpiration);
-                                WebApiCache.Add(cachekey, t.Result, cacheTime.AbsoluteExpiration, baseKey);
+                            {                                
+                                var contentLength = actionExecutedContext.Response.Content.Headers.ContentLength;
 
-                                WebApiCache.Add(cachekey + Constants.ContentTypeKey,
-                                                actionExecutedContext.Response.Content.Headers.ContentType.MediaType,
-                                                cacheTime.AbsoluteExpiration, baseKey);
+                                var contentBytes = t.Result;
+                                if (contentLength == NullContentLength
+                                    && contentBytes != null                                    
+                                    && string.Equals(Encoding.UTF8.GetString(contentBytes), NullContent, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // do nothing, because we do not want to put no result / null to the cache
+                                    // this sometimes means that our endpoint fails to get data from underlying system
 
-                                WebApiCache.Add(cachekey + Constants.EtagKey,
-                                                actionExecutedContext.Response.Headers.ETag.Tag,
-                                                cacheTime.AbsoluteExpiration, baseKey);
+                                    if (!NoCache)
+                                    {
+                                        actionExecutedContext.Response.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+                                        actionExecutedContext.Response.Headers.Add("Pragma", "no-cache");
+                                    }
+
+                                }
+                                else if (contentBytes != null)
+                                {
+                                    var baseKey = config.MakeBaseCachekey(actionExecutedContext.ActionContext.ControllerContext.ControllerDescriptor.ControllerName, actionExecutedContext.ActionContext.ActionDescriptor.ActionName);
+
+                                    WebApiCache.Add(baseKey, string.Empty, cacheTime.AbsoluteExpiration);
+                                    WebApiCache.Add(cachekey, t.Result, cacheTime.AbsoluteExpiration, baseKey);
+
+                                    WebApiCache.Add(cachekey + Constants.ContentTypeKey,
+                                                    actionExecutedContext.Response.Content.Headers.ContentType.MediaType,
+                                                    cacheTime.AbsoluteExpiration, baseKey);
+
+                                    WebApiCache.Add(cachekey + Constants.EtagKey,
+                                                    actionExecutedContext.Response.Headers.ETag.Tag,
+                                                    cacheTime.AbsoluteExpiration, baseKey);
+                                }
                             });
                     }
                 }
