@@ -178,6 +178,9 @@ namespace WebAPI.OutputCache
 
                 var cachekey = cacheKeyGenerator.MakeCacheKey(actionExecutedContext.ActionContext, _responseMediaType, ExcludeQueryStringFromCacheKey);
 
+                
+
+
                 if (!string.IsNullOrWhiteSpace(cachekey) && !(WebApiCache.Contains(cachekey)))
                 {
                     SetEtag(actionExecutedContext.Response, Guid.NewGuid().ToString());
@@ -186,22 +189,13 @@ namespace WebAPI.OutputCache
                     {
                         actionExecutedContext.Response.Content.ReadAsByteArrayAsync().ContinueWith(t =>
                             {                                
-                                var contentLength = actionExecutedContext.Response.Content.Headers.ContentLength;
-
                                 var contentBytes = t.Result;
-                                if (contentLength == NullContentLength
-                                    && contentBytes != null                                    
+                                if (contentBytes != null
+                                    && contentBytes.Length == NullContentLength                                    
                                     && string.Equals(Encoding.UTF8.GetString(contentBytes), NullContent, StringComparison.OrdinalIgnoreCase))
                                 {
                                     // do nothing, because we do not want to put no result / null to the cache
-                                    // this sometimes means that our endpoint fails to get data from underlying system
-
-                                    if (!NoCache)
-                                    {
-                                        actionExecutedContext.Response.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
-                                        actionExecutedContext.Response.Headers.Add("Pragma", "no-cache");
-                                    }
-
+                                    // this sometimes means that our endpoint fails to get data from underlying system                                    
                                 }
                                 else if (contentBytes != null)
                                 {
@@ -223,7 +217,18 @@ namespace WebAPI.OutputCache
                 }
             }
 
-            ApplyCacheHeaders(actionExecutedContext.ActionContext.Response, cacheTime);
+            if (actionExecutedContext.Response.Content != null 
+                && actionExecutedContext.Response.Content.Headers != null)
+            {
+                if (actionExecutedContext.Response.Content.Headers.ContentLength == NullContentLength)
+                {
+                    NoCache = true;
+                    cacheTime.ClientTimeSpan = TimeSpan.Zero;
+                    this.ClientTimeSpan = 0;
+                    this.ServerTimeSpan = 0;
+                }                
+                ApplyCacheHeaders(actionExecutedContext.ActionContext.Response, cacheTime);
+            }
         }
 
         private void ApplyCacheHeaders(HttpResponseMessage response, CacheTime cacheTime)
